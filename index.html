@@ -145,7 +145,7 @@
 <body>
 
 <header>
-  <h1>🏂 濵田匠真 トレーニングログ</h1>
+  <h1>🏋 濵田匠真 トレーニングログ</h1>
   <p>ウエイトトレーニング記録 &amp; ダッシュボード</p>
 </header>
 
@@ -196,7 +196,7 @@
         </table>
       </details>
 
-      <div class="legend"><span style="color:var(--text-muted)">重量(kg) ・ 回数 ・ RPE を入力</span></div>
+      <div class="legend"><span id="setsLegend" style="color:var(--text-muted)">重量(kg) ・ 回数 ・ RPE を入力</span></div>
       <div id="setsList"></div>
       <button class="addset" onclick="addSet()">＋ セットを追加</button>
     </div>
@@ -217,14 +217,14 @@
     </div>
 
     <div class="card">
-      <h2>推定1RMの推移(Epley式)</h2>
-      <div class="legend"><span><i style="background:var(--series-1)"></i>推定1RM (kg)</span></div>
+      <h2 id="chart1Title">推定1RMの推移(Epley式)</h2>
+      <div class="legend" id="chart1Legend"><span><i style="background:var(--series-1)"></i>推定1RM (kg)</span></div>
       <div class="chartwrap"><canvas id="chart1rm"></canvas></div>
     </div>
 
     <div class="card">
-      <h2>総重量(ボリューム)の推移</h2>
-      <div class="legend"><span><i style="background:var(--series-2)"></i>総重量 (kg)</span></div>
+      <h2 id="chart2Title">総重量(ボリューム)の推移</h2>
+      <div class="legend" id="chart2Legend"><span><i style="background:var(--series-2)"></i>総重量 (kg)</span></div>
       <div class="chartwrap"><canvas id="chartVolume"></canvas></div>
     </div>
 
@@ -248,6 +248,8 @@ const EXERCISES = {
 };
 const ABS_TYPES = ["オリジナル腹筋", "アブローラー(膝立ち)", "レッグレイズ", "プランク", "その他"];
 const LOWER_BODY_EXERCISES = ["デッドリフト", "スクワット"]; // 重量アップ幅が大きい種目
+const BODYWEIGHT_EXERCISES = ["腹筋種目"]; // 重量を扱わない自重種目
+function isBodyweight(exercise) { return BODYWEIGHT_EXERCISES.includes(exercise); }
 
 let currentDay = "DAY1";
 let sets = []; // {weight, reps, rpe}
@@ -302,6 +304,7 @@ function setDay(day) {
 function onExerciseChange() {
   const ex = document.getElementById('exerciseSelect').value;
   document.getElementById('absWrap').style.display = (ex === '腹筋種目') ? 'block' : 'none';
+  renderSets();
   renderTargetCard();
 }
 
@@ -330,14 +333,18 @@ function updateSet(i, field, value) {
 }
 function renderSets() {
   const wrap = document.getElementById('setsList');
+  const exercise = document.getElementById('exerciseSelect').value;
+  const bw = isBodyweight(exercise);
+  const legendEl = document.getElementById('setsLegend');
+  if (legendEl) legendEl.textContent = bw ? '回数 ・ RPE を入力(自重種目のため重量の入力は不要です)' : '重量(kg) ・ 回数 ・ RPE を入力';
   wrap.innerHTML = '';
   sets.forEach((s, i) => {
     const row = document.createElement('div');
     row.className = 'setrow';
     row.innerHTML = `
       <div class="setnum">${i + 1}</div>
-      <input type="number" inputmode="decimal" placeholder="重量kg" value="${s.weight}" step="0.5"
-        onchange="updateSet(${i},'weight',this.value)">
+      ${bw ? '' : `<input type="number" inputmode="decimal" placeholder="重量kg" value="${s.weight}" step="0.5"
+        onchange="updateSet(${i},'weight',this.value)">`}
       <input type="number" inputmode="numeric" placeholder="回数" value="${s.reps}"
         onchange="updateSet(${i},'reps',this.value)">
       <input type="number" inputmode="numeric" placeholder="RPE" value="${s.rpe}" step="0.5" min="1" max="10"
@@ -352,17 +359,18 @@ function renderSets() {
 async function saveRecord() {
   const date = document.getElementById('dateInput').value;
   const exercise = document.getElementById('exerciseSelect').value;
+  const bw = isBodyweight(exercise);
   const note = (exercise === '腹筋種目') ? document.getElementById('absSelect').value : '';
-  const validSets = sets.filter(s => s.weight !== '' && s.reps !== '');
+  const validSets = sets.filter(s => (bw || s.weight !== '') && s.reps !== '');
 
   if (!validSets.length) {
-    showToast('重量と回数を入力してください');
+    showToast(bw ? '回数を入力してください' : '重量と回数を入力してください');
     return;
   }
   const rows = validSets.map((s, i) => ({
     date, day: currentDay, exercise,
     setNumber: i + 1,
-    weight: Number(s.weight),
+    weight: bw ? '' : Number(s.weight),
     reps: Number(s.reps),
     rpe: s.rpe === '' ? '' : Number(s.rpe),
     note
@@ -448,15 +456,36 @@ function latestSessionSets(exercise) {
 /* ============ 次回目標ロジック ============ */
 function computeNextTarget(exercise, lastSets) {
   if (!lastSets || !lastSets.length) return null;
-  const weights = lastSets.map(s => s.weight).filter(Boolean);
-  const baseWeight = weights.length ? Math.max(...weights) : 0;
-  const allHitTop = lastSets.every(s => s.reps >= 12);
-  const anyBelowMin = lastSets.some(s => s.reps < 8);
   const rpes = lastSets.map(s => s.rpe).filter(v => v !== null && v !== undefined);
   const avgRpe = rpes.length ? rpes.reduce((a,b)=>a+b,0) / rpes.length : null;
   const highRpe = avgRpe !== null && avgRpe >= 9;
+  const anyBelowMin = lastSets.some(s => s.reps < 8);
 
-  const inc = LOWER_BODY_EXERCISES.includes(exercise) && exercise === 'デッドリフト' ? 5 : 2.5;
+  if (isBodyweight(exercise)) {
+    // 自重種目は重量ではなく回数(と負荷バリエーション)で進捗を測る
+    const baseReps = Math.max(...lastSets.map(s => s.reps));
+    const allHitTop = lastSets.every(s => s.reps >= 15);
+    let status, repsTarget, comment;
+    if (allHitTop && !highRpe) {
+      status = 'good';
+      repsTarget = `${baseReps + 3}回`;
+      comment = `${baseReps}回を余裕でクリアしています。回数を+3回増やすか、より負荷の高いバリエーションに挑戦しましょう。`;
+    } else if (anyBelowMin || highRpe) {
+      status = 'warn';
+      repsTarget = `${baseReps}回`;
+      comment = 'きつい(RPE高め)セットがありました。同じ回数・同じバリエーションでフォームの安定を優先しましょう。';
+    } else {
+      status = 'good';
+      repsTarget = `${baseReps + 1}〜${baseReps + 2}回`;
+      comment = '良い強度です。同じバリエーションのまま、回数を1〜2回伸ばすことを目標にしましょう。';
+    }
+    return { status, bodyweight: true, repsTarget, sets: lastSets.length, comment };
+  }
+
+  const weights = lastSets.map(s => s.weight).filter(Boolean);
+  const baseWeight = weights.length ? Math.max(...weights) : 0;
+  const allHitTop = lastSets.every(s => s.reps >= 12);
+  const inc = exercise === 'デッドリフト' ? 5 : 2.5;
 
   let status, weight, repsTarget, comment;
   if (allHitTop && !highRpe) {
@@ -475,7 +504,7 @@ function computeNextTarget(exercise, lastSets) {
     repsTarget = '前回より多い回数';
     comment = '良い強度です。同じ重量のまま、回数を1〜2回伸ばすことを目標にしましょう。';
   }
-  return { status, weight, repsTarget, sets: lastSets.length, comment };
+  return { status, bodyweight: false, weight, repsTarget, sets: lastSets.length, comment };
 }
 
 function renderTargetCard() {
@@ -493,7 +522,11 @@ function renderTargetCard() {
     return;
   }
   const target = computeNextTarget(exercise, last.sets);
-  const prevSummary = last.sets.map(s => `${s.weight}kg×${s.reps}回${s.rpe ? '(RPE'+s.rpe+')' : ''}`).join(' / ');
+  const bwEx = isBodyweight(exercise);
+  const prevSummary = last.sets.map(s => `${bwEx ? '' : s.weight + 'kg×'}${s.reps}回${s.rpe ? '(RPE'+s.rpe+')' : ''}`).join(' / ');
+  const valText = target.bodyweight
+    ? `${target.repsTarget} × ${target.sets}セット`
+    : `${target.weight}kg × ${target.repsTarget} × ${target.sets}セット`;
   wrap.style.display = 'block';
   body.innerHTML = `
     <div class="muted-note" style="margin-bottom:10px;">前回(${last.date}): ${prevSummary}</div>
@@ -501,7 +534,7 @@ function renderTargetCard() {
       <div class="icon">${target.status === 'good' ? '💪' : '⚠️'}</div>
       <div>
         <div class="label">次回の目標</div>
-        <div class="val">${target.weight}kg × ${target.repsTarget} × ${target.sets}セット</div>
+        <div class="val">${valText}</div>
         <div class="note">${target.comment}</div>
       </div>
     </div>
@@ -527,18 +560,41 @@ function populateDashExerciseSelect() {
 
 function renderDashboard() {
   const exercise = document.getElementById('dashExerciseSelect').value;
+  const bwEx = isBodyweight(exercise);
   const recs = recordsFor(exercise);
   const byDate = groupByDate(recs);
   const dates = Object.keys(byDate).sort();
 
-  const oneRMSeries = dates.map(d => {
-    const best = Math.max(...byDate[d].map(s => epley1RM(s.weight, s.reps)));
-    return Math.round(best * 10) / 10;
-  });
-  const volumeSeries = dates.map(d => byDate[d].reduce((sum, s) => sum + s.weight * s.reps, 0));
+  const chart1Title = document.getElementById('chart1Title');
+  const chart1Legend = document.getElementById('chart1Legend');
+  const chart2Title = document.getElementById('chart2Title');
+  const chart2Legend = document.getElementById('chart2Legend');
 
-  drawChart('chart1rm', 'chart1rmInstance', dates, oneRMSeries, getCss('--series-1'));
-  drawChart('chartVolume', 'chartVolumeInstance', dates, volumeSeries, getCss('--series-2'));
+  let series1, series2;
+  if (bwEx) {
+    chart1Title.textContent = '総回数の推移';
+    chart1Legend.innerHTML = `<span><i style="background:var(--series-1)"></i>総回数 (回)</span>`;
+    chart2Title.textContent = '平均RPEの推移';
+    chart2Legend.innerHTML = `<span><i style="background:var(--series-2)"></i>平均RPE</span>`;
+    series1 = dates.map(d => byDate[d].reduce((sum, s) => sum + s.reps, 0));
+    series2 = dates.map(d => {
+      const rpes = byDate[d].map(s => s.rpe).filter(v => v !== null && v !== undefined);
+      return rpes.length ? Math.round((rpes.reduce((a,b)=>a+b,0) / rpes.length) * 10) / 10 : 0;
+    });
+  } else {
+    chart1Title.textContent = '推定1RMの推移(Epley式)';
+    chart1Legend.innerHTML = `<span><i style="background:var(--series-1)"></i>推定1RM (kg)</span>`;
+    chart2Title.textContent = '総重量(ボリューム)の推移';
+    chart2Legend.innerHTML = `<span><i style="background:var(--series-2)"></i>総重量 (kg)</span>`;
+    series1 = dates.map(d => {
+      const best = Math.max(...byDate[d].map(s => epley1RM(s.weight, s.reps)));
+      return Math.round(best * 10) / 10;
+    });
+    series2 = dates.map(d => byDate[d].reduce((sum, s) => sum + s.weight * s.reps, 0));
+  }
+
+  drawChart('chart1rm', 'chart1rmInstance', dates, series1, getCss('--series-1'));
+  drawChart('chartVolume', 'chartVolumeInstance', dates, series2, getCss('--series-2'));
 
   // 次回目標
   const last = latestSessionSets(exercise);
@@ -546,13 +602,16 @@ function renderDashboard() {
   const dashBody = document.getElementById('dashTargetBody');
   if (last) {
     const target = computeNextTarget(exercise, last.sets);
+    const valText = target.bodyweight
+      ? `${target.repsTarget} × ${target.sets}セット`
+      : `${target.weight}kg × ${target.repsTarget} × ${target.sets}セット`;
     dashWrap.style.display = 'block';
     dashBody.innerHTML = `
       <div class="targetcard">
         <div class="icon">${target.status === 'good' ? '💪' : '⚠️'}</div>
         <div>
           <div class="label">次回の目標</div>
-          <div class="val">${target.weight}kg × ${target.repsTarget} × ${target.sets}セット</div>
+          <div class="val">${valText}</div>
           <div class="note">${target.comment}</div>
         </div>
       </div>`;
@@ -566,14 +625,27 @@ function renderDashboard() {
     histWrap.innerHTML = `<div class="empty">まだ記録がありません</div>`;
   } else {
     const recentDates = dates.slice(-8).reverse();
-    let html = `<table class="hist"><tr><th>日付</th><th>記録</th><th>総重量</th><th>推定1RM</th></tr>`;
-    recentDates.forEach(d => {
-      const daySets = byDate[d].sort((a,b)=>a.setNumber-b.setNumber);
-      const summary = daySets.map(s => `${s.weight}×${s.reps}${s.rpe ? '(RPE'+s.rpe+')' : ''}`).join(' / ');
-      const vol = daySets.reduce((sum, s) => sum + s.weight * s.reps, 0);
-      const best1rm = Math.round(Math.max(...daySets.map(s => epley1RM(s.weight, s.reps))) * 10) / 10;
-      html += `<tr><td>${d}</td><td>${summary}</td><td>${vol}kg</td><td>${best1rm}kg</td></tr>`;
-    });
+    let html;
+    if (bwEx) {
+      html = `<table class="hist"><tr><th>日付</th><th>記録</th><th>総回数</th><th>平均RPE</th></tr>`;
+      recentDates.forEach(d => {
+        const daySets = byDate[d].sort((a,b)=>a.setNumber-b.setNumber);
+        const summary = daySets.map(s => `${s.reps}回${s.rpe ? '(RPE'+s.rpe+')' : ''}`).join(' / ');
+        const totalReps = daySets.reduce((sum, s) => sum + s.reps, 0);
+        const rpes = daySets.map(s => s.rpe).filter(v => v !== null && v !== undefined);
+        const avgRpe = rpes.length ? Math.round((rpes.reduce((a,b)=>a+b,0) / rpes.length) * 10) / 10 : '-';
+        html += `<tr><td>${d}</td><td>${summary}</td><td>${totalReps}回</td><td>${avgRpe}</td></tr>`;
+      });
+    } else {
+      html = `<table class="hist"><tr><th>日付</th><th>記録</th><th>総重量</th><th>推定1RM</th></tr>`;
+      recentDates.forEach(d => {
+        const daySets = byDate[d].sort((a,b)=>a.setNumber-b.setNumber);
+        const summary = daySets.map(s => `${s.weight}×${s.reps}${s.rpe ? '(RPE'+s.rpe+')' : ''}`).join(' / ');
+        const vol = daySets.reduce((sum, s) => sum + s.weight * s.reps, 0);
+        const best1rm = Math.round(Math.max(...daySets.map(s => epley1RM(s.weight, s.reps))) * 10) / 10;
+        html += `<tr><td>${d}</td><td>${summary}</td><td>${vol}kg</td><td>${best1rm}kg</td></tr>`;
+      });
+    }
     html += `</table>`;
     histWrap.innerHTML = html;
   }
