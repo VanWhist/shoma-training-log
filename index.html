@@ -382,7 +382,18 @@ function removeSet(i) {
   renderSets();
 }
 function updateSet(i, field, value) {
+  if (field === 'rpe' && value !== '') {
+    const num = Number(value);
+    if (!Number.isNaN(num)) {
+      const clamped = Math.round(Math.min(10, Math.max(1, num)) * 2) / 2;
+      if (clamped !== num) {
+        value = clamped;
+        showToast(`RPEは1〜10の範囲で入力してください(${clamped}に調整しました)`);
+      }
+    }
+  }
   sets[i][field] = value;
+  renderSets();
 }
 function renderSets() {
   const wrap = document.getElementById('setsList');
