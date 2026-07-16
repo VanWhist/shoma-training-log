@@ -362,6 +362,12 @@ function switchTab(tab) {
   document.getElementById('view-dash').style.display = (tab === 'dash') ? 'block' : 'none';
   if (tab === 'dash') {
     populateDashExerciseSelect();
+    // 記録タブで選択中の種目をダッシュボードにも反映する
+    const recordEx = document.getElementById('exerciseSelect').value;
+    const dashSel = document.getElementById('dashExerciseSelect');
+    if (recordEx && Array.from(dashSel.options).some(o => o.value === recordEx)) {
+      dashSel.value = recordEx;
+    }
     renderDashboard();
   }
 }
