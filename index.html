@@ -140,6 +140,18 @@
   .legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
   .legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .contextwarn {
+    display: none;
+    background: rgba(201,133,0,0.14);
+    color: var(--warning);
+    border: 1px solid rgba(201,133,0,0.35);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.5;
+    margin: 0 0 10px;
+  }
 </style>
 </head>
 <body>
@@ -206,6 +218,7 @@
       <button class="addset" onclick="addSet()">＋ セットを追加</button>
     </div>
 
+    <div id="setsContextWarning" class="contextwarn"></div>
     <button class="savebtn" id="saveBtn" onclick="saveRecord()">この記録を保存する</button>
   </div>
 
@@ -283,6 +296,8 @@ function isBodyweightRecord(exercise, note) {
 
 let currentDay = "DAY1";
 let sets = []; // {weight, reps, rpe}
+let setsExercise = ''; // sets配列が最後に入力された時点の種目(切り替え検知用)
+let setsDay = '';       // sets配列が最後に入力された時点のDAY(切り替え検知用)
 let allRecords = []; // API から取得した全記録
 let loaded = false;
 
@@ -373,12 +388,18 @@ function switchTab(tab) {
 }
 
 /* ============ セット入力 ============ */
+function markSetsContext() {
+  setsExercise = document.getElementById('exerciseSelect').value;
+  setsDay = currentDay;
+}
 function addSet() {
   sets.push({ weight: sets.length ? sets[sets.length-1].weight : '', reps: '', rpe: '' });
+  markSetsContext();
   renderSets();
 }
 function removeSet(i) {
   sets.splice(i, 1);
+  markSetsContext();
   renderSets();
 }
 function updateSet(i, field, value) {
@@ -393,6 +414,7 @@ function updateSet(i, field, value) {
     }
   }
   sets[i][field] = value;
+  markSetsContext();
   renderSets();
 }
 function renderSets() {
@@ -416,6 +438,22 @@ function renderSets() {
     `;
     wrap.appendChild(row);
   });
+  renderSetsContextWarning();
+}
+
+function renderSetsContextWarning() {
+  const banner = document.getElementById('setsContextWarning');
+  if (!banner) return;
+  const currentEx = document.getElementById('exerciseSelect').value;
+  const hasData = sets.some(s => s.weight !== '' || s.reps !== '' || s.rpe !== '');
+  const mismatched = hasData && setsExercise && (setsExercise !== currentEx || setsDay !== currentDay);
+  if (mismatched) {
+    banner.style.display = 'block';
+    banner.textContent = `⚠️ このセットは「${setsExercise}」(${setsDay})で入力したものです。このまま保存すると「${currentEx}」として記録されます。`;
+  } else {
+    banner.style.display = 'none';
+    banner.textContent = '';
+  }
 }
 
 /* ============ 保存 ============ */
