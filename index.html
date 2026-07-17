@@ -152,6 +152,35 @@
     line-height: 1.5;
     margin: 0 0 10px;
   }
+  .editrowbtn {
+    border: 1px solid var(--border); background: var(--page); color: var(--series-1);
+    border-radius: 8px; padding: 4px 9px; font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  table.hist td.editcol, table.hist th.editcol { width: 34px; text-align: center; }
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+    z-index: 60; align-items: flex-end; justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal-sheet {
+    background: var(--surface-1); width: 100%; max-width: 520px;
+    border-radius: 16px 16px 0 0; padding: 20px;
+    max-height: 88vh; overflow-y: auto;
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
+  .modal-sheet h2 { margin: 0 0 14px; font-size: 16px; }
+  .modal-actions { display: flex; gap: 10px; margin-top: 4px; }
+  .modal-actions > * { flex: 1; margin-bottom: 0; }
+  .btn-secondary {
+    padding: 14px; border-radius: 12px; border: 1px solid var(--border);
+    background: var(--page); color: var(--text-primary); font-size: 16px; font-weight: 700;
+  }
+  .btn-danger {
+    width: 100%; margin-top: 10px; padding: 12px; border-radius: 12px;
+    border: 1px solid rgba(208,59,59,0.35);
+    background: rgba(208,59,59,0.10); color: var(--critical); font-size: 14px; font-weight: 700;
+  }
 </style>
 </head>
 <body>
@@ -260,6 +289,43 @@
 
 <div class="statustoast" id="toast"></div>
 
+<div class="modal-overlay" id="editOverlay">
+  <div class="modal-sheet">
+    <h2>記録を編集</h2>
+
+    <label for="editDateInput">日付</label>
+    <input type="date" id="editDateInput">
+
+    <div class="daytabs">
+      <button id="editDay-DAY1" onclick="setEditDay('DAY1')">DAY1</button>
+      <button id="editDay-DAY2" onclick="setEditDay('DAY2')">DAY2</button>
+    </div>
+
+    <label for="editExerciseSelect">種目</label>
+    <select id="editExerciseSelect" onchange="onEditExerciseChange()"></select>
+
+    <div id="editAbsWrap" style="display:none;">
+      <label for="editAbsSelect">腹筋の種類</label>
+      <select id="editAbsSelect"></select>
+    </div>
+
+    <div id="editPullupWrap" style="display:none;">
+      <label for="editPullupSelect">懸垂のタイプ</label>
+      <select id="editPullupSelect" onchange="onEditPullupTypeChange()"></select>
+    </div>
+
+    <label style="margin-top:4px;">セット記録</label>
+    <div id="editSetsList"></div>
+    <button class="addset" onclick="editAddSet()">＋ セットを追加</button>
+
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeEditModal()">キャンセル</button>
+      <button class="savebtn" id="editSaveBtn" onclick="saveEditSession()">保存する</button>
+    </div>
+    <button class="btn-danger" onclick="deleteEditSession()">🗑 この記録を削除する</button>
+  </div>
+</div>
+
 <script>
 /* ============ 設定 ============ */
 // Google Apps Script の Web アプリ URL をここに設定してください
@@ -301,6 +367,13 @@ let setsDay = '';       // sets配列が最後に入力された時点のDAY(切
 let allRecords = []; // API から取得した全記録
 let loaded = false;
 
+/* ============ 記録編集(モーダル) ============ */
+let editSets = [];       // 編集中のセット配列 {weight, reps, rpe}
+let editingIds = [];     // 編集対象として置き換える既存レコードのid一覧
+let editDay = "DAY1";
+let editRestoreNote = ''; // モーダルを開いた時点の元のnote(懸垂タイプ/腹筋タイプ)。種目セレクト初期化時に一度だけ復元する
+let currentDashByDate = {}; // ダッシュボードに表示中の日付→レコード配列(編集ボタンからの参照用)
+
 /* ============ 初期化 ============ */
 function todayStr() {
   const d = new Date();
@@ -313,6 +386,8 @@ function init() {
   populateAbsSelect();
   populatePullupSelect();
   populateExerciseSelect();
+  populateEditAbsSelect();
+  populateEditPullupSelect();
   addSet();
   addSet();
   addSet();
@@ -342,6 +417,26 @@ function populateAbsSelect() {
 
 function populatePullupSelect() {
   const sel = document.getElementById('pullupSelect');
+  sel.innerHTML = '';
+  PULLUP_TYPES.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t; opt.textContent = t;
+    sel.appendChild(opt);
+  });
+}
+
+function populateEditAbsSelect() {
+  const sel = document.getElementById('editAbsSelect');
+  sel.innerHTML = '';
+  ABS_TYPES.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t; opt.textContent = t;
+    sel.appendChild(opt);
+  });
+}
+
+function populateEditPullupSelect() {
+  const sel = document.getElementById('editPullupSelect');
   sel.innerHTML = '';
   PULLUP_TYPES.forEach(t => {
     const opt = document.createElement('option');
@@ -510,6 +605,207 @@ function showToast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+/* ============ 記録編集(モーダル) ============ */
+function populateEditExerciseSelect() {
+  const sel = document.getElementById('editExerciseSelect');
+  sel.innerHTML = '';
+  EXERCISES[editDay].forEach(ex => {
+    const opt = document.createElement('option');
+    opt.value = ex; opt.textContent = ex;
+    sel.appendChild(opt);
+  });
+}
+
+function setEditDay(day) {
+  editDay = day;
+  document.getElementById('editDay-DAY1').classList.toggle('active', day === 'DAY1');
+  document.getElementById('editDay-DAY2').classList.toggle('active', day === 'DAY2');
+  populateEditExerciseSelect();
+  onEditExerciseChange();
+}
+
+function onEditExerciseChange() {
+  const ex = document.getElementById('editExerciseSelect').value;
+  document.getElementById('editAbsWrap').style.display = isBodyweight(ex) ? 'block' : 'none';
+  document.getElementById('editPullupWrap').style.display = (ex === '懸垂') ? 'block' : 'none';
+  if (editRestoreNote) {
+    if (ex === '懸垂' && PULLUP_TYPES.includes(editRestoreNote)) {
+      document.getElementById('editPullupSelect').value = editRestoreNote;
+    } else if (isBodyweight(ex) && ABS_TYPES.includes(editRestoreNote)) {
+      document.getElementById('editAbsSelect').value = editRestoreNote;
+    }
+  }
+  renderEditSets();
+}
+
+function onEditPullupTypeChange() {
+  renderEditSets();
+}
+
+function editCurrentEntryIsBodyweight() {
+  const ex = document.getElementById('editExerciseSelect').value;
+  if (isBodyweight(ex)) return true;
+  if (ex === '懸垂') {
+    return !isPullupWeighted(document.getElementById('editPullupSelect').value);
+  }
+  return false;
+}
+
+function editAddSet() {
+  editSets.push({ weight: editSets.length ? editSets[editSets.length-1].weight : '', reps: '', rpe: '' });
+  renderEditSets();
+}
+function editRemoveSet(i) {
+  editSets.splice(i, 1);
+  renderEditSets();
+}
+function editUpdateSet(i, field, value) {
+  if (field === 'rpe' && value !== '') {
+    const num = Number(value);
+    if (!Number.isNaN(num)) {
+      const clamped = Math.round(Math.min(10, Math.max(1, num)) * 2) / 2;
+      if (clamped !== num) {
+        value = clamped;
+        showToast(`RPEは1〜10の範囲で入力してください(${clamped}に調整しました)`);
+      }
+    }
+  }
+  editSets[i][field] = value;
+  renderEditSets();
+}
+
+function renderEditSets() {
+  const wrap = document.getElementById('editSetsList');
+  if (!wrap) return;
+  const bw = editCurrentEntryIsBodyweight();
+  wrap.innerHTML = '';
+  editSets.forEach((s, i) => {
+    const row = document.createElement('div');
+    row.className = 'setrow';
+    row.innerHTML = `
+      <div class="setnum">${i + 1}</div>
+      ${bw ? '' : `<input type="number" inputmode="decimal" placeholder="重量kg" value="${s.weight}" step="0.5"
+        onchange="editUpdateSet(${i},'weight',this.value)">`}
+      <input type="number" inputmode="numeric" placeholder="回数" value="${s.reps}"
+        onchange="editUpdateSet(${i},'reps',this.value)">
+      <input type="number" inputmode="numeric" placeholder="RPE" value="${s.rpe}" step="0.5" min="1" max="10"
+        onchange="editUpdateSet(${i},'rpe',this.value)">
+      <button class="del" onclick="editRemoveSet(${i})">×</button>
+    `;
+    wrap.appendChild(row);
+  });
+}
+
+// ダッシュボードの履歴テーブルの編集ボタンから呼ばれる。dateは currentDashByDate のキー(表示中の種目・タイプで絞り込み済み)
+function openEditSession(date) {
+  const daySets = (currentDashByDate[date] || []).slice().sort((a,b) => a.setNumber - b.setNumber);
+  if (!daySets.length) return;
+  editingIds = daySets.map(s => s.id).filter(Boolean);
+  if (editingIds.length !== daySets.length) {
+    showToast('idの無い古いデータが含まれているため、保存すると一部の記録が重複する可能性があります');
+  }
+  const first = daySets[0];
+  editSets = daySets.map(s => ({
+    weight: s.weight,
+    reps: s.reps,
+    rpe: (s.rpe === null || s.rpe === undefined) ? '' : s.rpe
+  }));
+  editRestoreNote = first.note || '';
+  document.getElementById('editDateInput').value = date;
+  editDay = (first.day === 'DAY2') ? 'DAY2' : 'DAY1';
+  document.getElementById('editDay-DAY1').classList.toggle('active', editDay === 'DAY1');
+  document.getElementById('editDay-DAY2').classList.toggle('active', editDay === 'DAY2');
+  populateEditExerciseSelect();
+  const exSel = document.getElementById('editExerciseSelect');
+  if (Array.from(exSel.options).some(o => o.value === first.exercise)) {
+    exSel.value = first.exercise;
+  }
+  onEditExerciseChange();
+  document.getElementById('editOverlay').classList.add('show');
+}
+
+function closeEditModal() {
+  document.getElementById('editOverlay').classList.remove('show');
+}
+
+async function saveEditSession() {
+  const date = document.getElementById('editDateInput').value;
+  const exercise = document.getElementById('editExerciseSelect').value;
+  const bw = editCurrentEntryIsBodyweight();
+  let note = '';
+  if (isBodyweight(exercise)) {
+    note = document.getElementById('editAbsSelect').value;
+  } else if (exercise === '懸垂') {
+    note = document.getElementById('editPullupSelect').value;
+  }
+  if (!date) {
+    showToast('日付を入力してください');
+    return;
+  }
+  const validSets = editSets.filter(s => (bw || s.weight !== '') && s.reps !== '');
+  if (!validSets.length) {
+    showToast(bw ? '回数を入力してください' : '重量と回数を入力してください');
+    return;
+  }
+  const rows = validSets.map((s, i) => ({
+    date, day: editDay, exercise,
+    setNumber: i + 1,
+    weight: bw ? '' : Number(s.weight),
+    reps: Number(s.reps),
+    rpe: s.rpe === '' ? '' : Number(s.rpe),
+    note
+  }));
+
+  const btn = document.getElementById('editSaveBtn');
+  btn.disabled = true; btn.textContent = '保存中...';
+  try {
+    if (!API_URL || API_URL.indexOf('__') === 0) {
+      throw new Error('APIが未設定です');
+    }
+    await fetch(API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'replaceSession', deleteIds: editingIds, rows }),
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+    });
+    showToast('記録を修正しました ✓');
+    closeEditModal();
+    await loadRecords();
+    const dashSel = document.getElementById('dashExerciseSelect');
+    if (dashSel && Array.from(dashSel.options).some(o => o.value === exercise)) {
+      dashSel.value = exercise;
+    }
+    renderDashboard();
+  } catch (e) {
+    showToast('修正に失敗しました: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '保存する';
+  }
+}
+
+async function deleteEditSession() {
+  if (!editingIds.length) {
+    showToast('この記録には削除用のIDが無いため削除できません');
+    return;
+  }
+  if (!confirm('この日の記録を削除します。よろしいですか？(元に戻せません)')) return;
+  try {
+    if (!API_URL || API_URL.indexOf('__') === 0) {
+      throw new Error('APIが未設定です');
+    }
+    await fetch(API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'replaceSession', deleteIds: editingIds, rows: [] }),
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+    });
+    showToast('記録を削除しました');
+    closeEditModal();
+    await loadRecords();
+    renderDashboard();
+  } catch (e) {
+    showToast('削除に失敗しました: ' + e.message);
+  }
 }
 
 /* ============ データ取得 ============ */
@@ -691,6 +987,7 @@ function renderDashboard() {
   }
   const byDate = groupByDate(recs);
   const dates = Object.keys(byDate).sort();
+  currentDashByDate = byDate;
 
   const chart1Title = document.getElementById('chart1Title');
   const chart1Legend = document.getElementById('chart1Legend');
@@ -754,23 +1051,23 @@ function renderDashboard() {
     const recentDates = dates.slice(-8).reverse();
     let html;
     if (bwEx) {
-      html = `<table class="hist"><tr><th>日付</th><th>記録</th><th>総回数</th><th>平均RPE</th></tr>`;
+      html = `<table class="hist"><tr><th>日付</th><th>記録</th><th>総回数</th><th>平均RPE</th><th class="editcol"></th></tr>`;
       recentDates.forEach(d => {
         const daySets = byDate[d].sort((a,b)=>a.setNumber-b.setNumber);
         const summary = daySets.map(s => `${s.reps}回${s.rpe ? '(RPE'+s.rpe+')' : ''}`).join(' / ');
         const totalReps = daySets.reduce((sum, s) => sum + s.reps, 0);
         const rpes = daySets.map(s => s.rpe).filter(v => v !== null && v !== undefined);
         const avgRpe = rpes.length ? Math.round((rpes.reduce((a,b)=>a+b,0) / rpes.length) * 10) / 10 : '-';
-        html += `<tr><td>${d}</td><td>${summary}</td><td>${totalReps}回</td><td>${avgRpe}</td></tr>`;
+        html += `<tr><td>${d}</td><td>${summary}</td><td>${totalReps}回</td><td>${avgRpe}</td><td class="editcol"><button class="editrowbtn" onclick="openEditSession('${d}')">✎</button></td></tr>`;
       });
     } else {
-      html = `<table class="hist"><tr><th>日付</th><th>記録</th><th>総重量</th><th>推定1RM</th></tr>`;
+      html = `<table class="hist"><tr><th>日付</th><th>記録</th><th>総重量</th><th>推定1RM</th><th class="editcol"></th></tr>`;
       recentDates.forEach(d => {
         const daySets = byDate[d].sort((a,b)=>a.setNumber-b.setNumber);
         const summary = daySets.map(s => `${s.weight}×${s.reps}${s.rpe ? '(RPE'+s.rpe+')' : ''}`).join(' / ');
         const vol = daySets.reduce((sum, s) => sum + s.weight * s.reps, 0);
         const best1rm = Math.round(Math.max(...daySets.map(s => epley1RM(s.weight, s.reps))) * 10) / 10;
-        html += `<tr><td>${d}</td><td>${summary}</td><td>${vol}kg</td><td>${best1rm}kg</td></tr>`;
+        html += `<tr><td>${d}</td><td>${summary}</td><td>${vol}kg</td><td>${best1rm}kg</td><td class="editcol"><button class="editrowbtn" onclick="openEditSession('${d}')">✎</button></td></tr>`;
       });
     }
     html += `</table>`;
