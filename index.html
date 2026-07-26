@@ -920,7 +920,7 @@ function computeNextTarget(exercise, lastSets, bodyweightMode) {
     if (type === '自重') {
       if (minReps < 6) {
         status = 'warn';
-        repsTarget = '補助を使って10回×3セット';
+        repsTarget = '補助を使って10回';
         comment = `自重での最低回数が6回未満でした。次回はチューブなどの補助を使い、10回×3セットを目指しましょう。 ${rpeZoneNote}`;
       } else if (achieved && !highRpe) {
         status = 'good';
@@ -928,18 +928,18 @@ function computeNextTarget(exercise, lastSets, bodyweightMode) {
         comment = `自重で10回×3セットを達成しました。次回は加重(重り)に挑戦してみましょう。 ${rpeZoneNote}`;
       } else {
         status = 'good';
-        repsTarget = '自重で10回×3セット';
+        repsTarget = '自重で10回';
         comment = `自重のまま、10回×3セットの達成を目指しましょう。 ${rpeZoneNote}`;
       }
     } else {
       // 補助
       if (achieved && !highRpe) {
         status = 'good';
-        repsTarget = '補助を弱めて10回×3セット';
+        repsTarget = '補助を弱めて10回';
         comment = `補助ありで10回×3セットを達成しました。次回は補助を弱めて(バンドを弱く/補助を減らして)、再度10回×3セットを目指しましょう。 ${rpeZoneNote}`;
       } else {
         status = 'good';
-        repsTarget = '補助を維持して10回×3セット';
+        repsTarget = '補助を維持して10回';
         comment = `現在の補助レベルのまま、10回×3セットの達成を目指しましょう。 ${rpeZoneNote}`;
       }
     }
