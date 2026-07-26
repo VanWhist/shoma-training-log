@@ -902,11 +902,52 @@ function computeNextTarget(exercise, lastSets, bodyweightMode) {
   if (!lastSets || !lastSets.length) return null;
   const rpes = lastSets.map(s => s.rpe).filter(v => v !== null && v !== undefined);
   const avgRpe = rpes.length ? rpes.reduce((a,b)=>a+b,0) / rpes.length : null;
-  const highRpe = avgRpe !== null && avgRpe >= 9;
+  const rpeZoneNote = avgRpe === null ? ''
+    : avgRpe < 7 ? `(RPE平均${avgRpe.toFixed(1)}: 物足りない強度かもしれません)`
+    : avgRpe <= 9 ? `(RPE平均${avgRpe.toFixed(1)}: 適正な強度です)`
+    : `(RPE平均${avgRpe.toFixed(1)}: きつすぎる可能性があります。無理は禁物です)`;
+  const highRpe = avgRpe !== null && avgRpe > 9;
   const anyBelowMin = lastSets.some(s => s.reps < 8);
 
+  if (bodyweightMode && exercise === '懸垂') {
+    // 懸垂(自重/補助): 10回×3セットを到達目標とした段階的アプローチ
+    const note = (lastSets[0] && lastSets[0].note) || '自重';
+    const type = (note === '補助') ? '補助' : '自重';
+    const minReps = Math.min(...lastSets.map(s => s.reps));
+    const achieved = lastSets.length >= 3 && lastSets.every(s => s.reps >= 10);
+    let status, repsTarget, comment;
+
+    if (type === '自重') {
+      if (minReps < 6) {
+        status = 'warn';
+        repsTarget = '補助を使って10回×3セット';
+        comment = `自重での最低回数が6回未満でした。次回はチューブなどの補助を使い、10回×3セットを目指しましょう。 ${rpeZoneNote}`;
+      } else if (achieved && !highRpe) {
+        status = 'good';
+        repsTarget = '加重に挑戦';
+        comment = `自重で10回×3セットを達成しました。次回は加重(重り)に挑戦してみましょう。 ${rpeZoneNote}`;
+      } else {
+        status = 'good';
+        repsTarget = '自重で10回×3セット';
+        comment = `自重のまま、10回×3セットの達成を目指しましょう。 ${rpeZoneNote}`;
+      }
+    } else {
+      // 補助
+      if (achieved && !highRpe) {
+        status = 'good';
+        repsTarget = '補助を弱めて10回×3セット';
+        comment = `補助ありで10回×3セットを達成しました。次回は補助を弱めて(バンドを弱く/補助を減らして)、再度10回×3セットを目指しましょう。 ${rpeZoneNote}`;
+      } else {
+        status = 'good';
+        repsTarget = '補助を維持して10回×3セット';
+        comment = `現在の補助レベルのまま、10回×3セットの達成を目指しましょう。 ${rpeZoneNote}`;
+      }
+    }
+    return { status, bodyweight: true, repsTarget, sets: lastSets.length, comment };
+  }
+
   if (bodyweightMode) {
-    // 自重種目は重量ではなく回数(と負荷バリエーション)で進捗を測る
+    // 腹筋種目など、懸垂以外の自重種目は従来通りのロジック
     const baseReps = Math.max(...lastSets.map(s => s.reps));
     const allHitTop = lastSets.every(s => s.reps >= 15);
     let status, repsTarget, comment;
@@ -926,27 +967,29 @@ function computeNextTarget(exercise, lastSets, bodyweightMode) {
     return { status, bodyweight: true, repsTarget, sets: lastSets.length, comment };
   }
 
+  // 加重種目(スクワット/ベンチプレス/ベントオーバーロー/デッドリフト/懸垂・加重):
+  // 8〜12回のダブルプログレッション
   const weights = lastSets.map(s => s.weight).filter(Boolean);
   const baseWeight = weights.length ? Math.max(...weights) : 0;
   const allHitTop = lastSets.every(s => s.reps >= 12);
   const inc = exercise === 'デッドリフト' ? 5 : 2.5;
 
   let status, weight, repsTarget, comment;
-  if (allHitTop && !highRpe) {
-    status = 'good';
-    weight = baseWeight + inc;
-    repsTarget = '8〜12回';
-    comment = `全セットで12回を余裕でクリア。重量を +${inc}kg に上げましょう。`;
-  } else if (anyBelowMin || highRpe) {
+  if (anyBelowMin) {
     status = 'warn';
     weight = baseWeight;
     repsTarget = '8〜12回';
-    comment = '8回に届かない、またはきつい(RPE高め)セットがありました。同じ重量でフォームと回数の安定を優先しましょう。';
+    comment = `8回に届かないセットがありました。同じ重量でまず全セット8回以上を目指しましょう。 ${rpeZoneNote}`;
+  } else if (allHitTop) {
+    status = 'good';
+    weight = baseWeight + inc;
+    repsTarget = '8〜12回';
+    comment = `全セットで12回に到達しました。次回は+${inc}kgに増量し、8回からの再スタートを目指しましょう。 ${rpeZoneNote}`;
   } else {
     status = 'good';
     weight = baseWeight;
-    repsTarget = '前回より多い回数';
-    comment = '良い強度です。同じ重量のまま、回数を1〜2回伸ばすことを目標にしましょう。';
+    repsTarget = '8〜12回(前回より多い回数)';
+    comment = `同じ重量のまま、8〜12回の範囲でできるだけ多い回数を目指しましょう。 ${rpeZoneNote}`;
   }
   return { status, bodyweight: false, weight, repsTarget, sets: lastSets.length, comment };
 }
