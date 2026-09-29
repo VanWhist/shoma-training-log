@@ -190,6 +190,29 @@
     border: 1px solid rgba(208,59,59,0.35);
     background: rgba(208,59,59,0.10); color: var(--critical); font-size: 14px; font-weight: 700;
   }
+
+  /* ---- 筋力期メニュー ---- */
+  .planbadge { font-size: 11px; font-weight: 600; color: var(--text-muted); margin-left: 6px; }
+  .planlist { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .planitem {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--page); color: var(--text-primary); font-size: 14px; text-align: left; cursor: pointer;
+  }
+  .planitem.active { border-color: var(--series-1); box-shadow: inset 0 0 0 1px var(--series-1); }
+  .planex { font-weight: 700; }
+  .planval { color: var(--text-secondary); font-size: 13px; white-space: nowrap; }
+  .plandone { color: var(--good); font-weight: 800; }
+  .plandetail { border-top: 1px solid var(--grid); padding-top: 12px; }
+  .planlabel { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+  .planbig { font-size: 22px; font-weight: 800; margin: 2px 0 6px; }
+  .plannote { font-size: 13px; color: var(--text-secondary); margin-top: 6px; line-height: 1.5; }
+  .plannote.warn { color: var(--warning); margin: 0 0 10px; }
+  .planbtn {
+    width: 100%; margin-top: 12px; padding: 12px; border-radius: 10px; border: 1px solid var(--series-1);
+    background: transparent; color: var(--series-1); font-size: 15px; font-weight: 700; cursor: pointer;
+  }
+  .planrules { margin: 8px 0 0; padding-left: 20px; font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
 </style>
 </head>
 <body>
@@ -216,12 +239,17 @@
     <div class="card">
       <h2>今日のメニュー</h2>
       <div class="daytabs">
+        <button id="mode-strength" onclick="setMode('strength')">筋力期メニュー</button>
+        <button id="mode-free" onclick="setMode('free')">自由記録</button>
+      </div>
+      <div class="daytabs">
         <button id="day-DAY1" class="active" onclick="setDay('DAY1')">DAY1</button>
         <button id="day-DAY2" onclick="setDay('DAY2')">DAY2</button>
+        <button id="day-DAY3" onclick="setDay('DAY3')">DAY3</button>
       </div>
 
       <label for="dateInput">日付</label>
-      <input type="date" id="dateInput">
+      <input type="date" id="dateInput" onchange="onDateChange()">
 
       <label for="exerciseSelect">種目</label>
       <select id="exerciseSelect" onchange="onExerciseChange()"></select>
@@ -235,6 +263,11 @@
         <label for="pullupSelect">懸垂のタイプ</label>
         <select id="pullupSelect" onchange="onPullupTypeChange()"></select>
       </div>
+    </div>
+
+    <div class="card" id="planCardWrap" style="display:none;">
+      <h2 id="planTitle">今日の予定</h2>
+      <div id="planBody"></div>
     </div>
 
     <div class="card" id="targetCardWrap" style="display:none;">
@@ -313,6 +346,7 @@
     <div class="daytabs">
       <button id="editDay-DAY1" onclick="setEditDay('DAY1')">DAY1</button>
       <button id="editDay-DAY2" onclick="setEditDay('DAY2')">DAY2</button>
+      <button id="editDay-DAY3" onclick="setEditDay('DAY3')">DAY3</button>
     </div>
 
     <label for="editExerciseSelect">種目</label>
@@ -347,7 +381,8 @@ const API_URL = "https://script.google.com/macros/s/AKfycbzNQbTzvuRuMN2tbMl6LNln
 
 const EXERCISES = {
   DAY1: ["スクワット", "ベンチプレス", "懸垂", "ベントオーバーバーベルロー"],
-  DAY2: ["デッドリフト", "ベントオーバーバーベルロー"]
+  DAY2: ["デッドリフト", "ベントオーバーバーベルロー"],
+  DAY3: ["スクワット", "ベンチプレス", "懸垂"]
 };
 const ABS_TYPES = ["オリジナル腹筋", "アブローラー(膝立ち)", "レッグレイズ", "プランク", "その他"];
 const LOWER_BODY_EXERCISES = ["デッドリフト", "スクワット"]; // 重量アップ幅が大きい種目
@@ -356,6 +391,253 @@ function isBodyweight(exercise) { return BODYWEIGHT_EXERCISES.includes(exercise)
 
 const PULLUP_TYPES = ["自重", "加重", "補助"]; // 懸垂のタイプ(重量入力があるのは「加重」のみ)
 function isPullupWeighted(type) { return type === '加重'; }
+
+/* ============ 筋力期メニュー(2026/10/1〜4週間・火=DAY1 / 木=DAY2 / 金=DAY3) ============ */
+const STRENGTH_START = '2026-10-01';   // 第1週の開始日(木曜)。1週間は木曜〜水曜
+const STRENGTH_WEEKS = 4;
+const STRENGTH_DAY_BY_WEEKDAY = { 2: 'DAY1', 4: 'DAY2', 5: 'DAY3' }; // getUTCDay(): 火=2, 木=4, 金=5
+const STRENGTH_WEEKDAY_LABEL = { DAY1: '火', DAY2: '木', DAY3: '金' };
+const STRENGTH_EXERCISES = {
+  DAY1: ["スクワット", "ベンチプレス", "懸垂"],
+  DAY2: ["デッドリフト", "ベントオーバーバーベルロー"],
+  DAY3: ["スクワット", "ベンチプレス", "懸垂"]
+};
+const STRENGTH_DAY_LABEL = {
+  DAY1: '重い日(スクワット・ベンチ)',
+  DAY2: 'デッドリフト・ロー',
+  DAY3: '軽い日(フォームとスピード)'
+};
+// weeks: 週ごとの [重量kg, 回数, セット数]。gate=第3週の増量を第2週の記録で自動判定、check=第4週に確認セットを案内
+const STRENGTH_PLAN = {
+  'DAY1|スクワット':   { gate: true, check: true, weeks: [[37.5,5,4],[40,4,4],[42.5,3,4],[32.5,5,3]] },
+  'DAY1|ベンチプレス': { gate: true, check: true, weeks: [[32.5,5,4],[35,4,4],[37.5,3,4],[30,5,3]] },
+  'DAY1|懸垂':         { bw: true, reps: 4, sets: 4 },
+  'DAY2|デッドリフト': { gate: true, check: true, weeks: [[37.5,5,3],[40,4,3],[42.5,3,3],[35,5,2]] },
+  'DAY2|ベントオーバーバーベルロー': { gate: true, weeks: [[37.5,6,3],[40,6,3],[42.5,5,3],[35,6,2]] },
+  'DAY3|スクワット':   { weeks: [[32.5,5,3],[32.5,5,3],[32.5,5,3],[32.5,5,3]] },
+  'DAY3|ベンチプレス': { weeks: [[30,6,3],[30,6,3],[30,6,3],[30,6,3]] },
+  'DAY3|懸垂':         { bw: true, reps: 4, sets: 4 }
+};
+const GATE_MAX_RPE = 8.5; // 第2週の全セットがこのRPE以下なら、第3週は増量する
+
+function dayExercises(day) {
+  return mode === 'strength' ? (STRENGTH_EXERCISES[day] || []) : (EXERCISES[day] || []);
+}
+
+function parseYmd(s) {
+  const p = String(s).split('-').map(Number);
+  return Date.UTC(p[0], p[1] - 1, p[2]);
+}
+
+// 日付 → 筋力期の週。{status:'before'|'in'|'after', week}
+function strengthWeekOf(dateStr) {
+  if (!dateStr) return null;
+  const diff = Math.floor((parseYmd(dateStr) - parseYmd(STRENGTH_START)) / 86400000);
+  if (diff < 0) return { status: 'before' };
+  const week = Math.floor(diff / 7) + 1;
+  if (week > STRENGTH_WEEKS) return { status: 'after' };
+  return { status: 'in', week };
+}
+
+function strengthDayOfDate(dateStr) {
+  if (!dateStr) return null;
+  return STRENGTH_DAY_BY_WEEKDAY[new Date(parseYmd(dateStr)).getUTCDay()] || null;
+}
+
+function sessionDone(dateStr, exercise) {
+  return allRecords.some(r => r.date === dateStr && r.exercise === exercise);
+}
+
+// 第3週の重さを決めるため、第2週(同じDAY・同じ種目)の最新セッションを判定する
+function week2Gate(day, exercise, w2) {
+  const kg2 = w2[0], reps2 = w2[1], sets2 = w2[2];
+  const recs = allRecords.filter(r => r.exercise === exercise && r.day === day && r.weight > 0
+    && (function () { const w = strengthWeekOf(r.date); return w && w.status === 'in' && w.week === 2; })());
+  if (!recs.length) {
+    return { pass: false, reason: '第2週の記録が見つからないため、安全のため今週は第2週と同じ重さで行います。' };
+  }
+  const dates = Array.from(new Set(recs.map(r => r.date))).sort();
+  const last = recs.filter(r => r.date === dates[dates.length - 1]);
+  const rpeVals = last.map(r => r.rpe).filter(v => v !== null && v !== undefined);
+  if (rpeVals.length < last.length) {
+    return { pass: false, reason: '第2週の記録にRPEが入っていないセットがあったため、今週は第2週と同じ重さで行います。' };
+  }
+  const maxRpe = Math.max.apply(null, rpeVals);
+  if (maxRpe > GATE_MAX_RPE) {
+    return { pass: false, reason: `第2週にRPE${maxRpe}のセットがあったため(基準はRPE${GATE_MAX_RPE}以下)、今週は第2週と同じ重さで繰り返します。` };
+  }
+  if (last.length < sets2 || last.some(r => r.reps < reps2)) {
+    return { pass: false, reason: `第2週に予定の回数(${reps2}回×${sets2}セット)ができていなかったため、今週は第2週と同じ重さで繰り返します。` };
+  }
+  if (last.some(r => r.weight < kg2)) {
+    return { pass: false, reason: '第2週に予定より軽い重さのセットがあったため、今週は第2週と同じ重さで繰り返します。' };
+  }
+  return { pass: true, reason: `第2週は全セットRPE${maxRpe}以下で予定回数ができたので、今週は+2.5kgに進みます。` };
+}
+
+function pullupHint() {
+  const base = '全セットできる補助の強さで、4回×4セット。種類(自重/補助)を選び、補助の強さはメモに残しましょう。';
+  const last = latestSessionSetsFromRecords(recordsFor('懸垂'));
+  if (last && last.sets.length >= 4 && last.sets.every(s => s.reps >= 5)) {
+    return [base, '前回は全セット5回以上できました。補助を1段階弱めてみましょう。'];
+  }
+  return [base];
+}
+
+// 1種目ぶんの予定 {bw, kg, reps, sets, notes[]}。予定がない場合はnull
+function strengthPrescription(day, exercise, week) {
+  const p = STRENGTH_PLAN[day + '|' + exercise];
+  if (!p) return null;
+  if (p.bw) return { bw: true, reps: p.reps, sets: p.sets, notes: pullupHint() };
+  let cur = p.weeks[week - 1].slice();
+  const notes = [];
+  if (p.gate && week === 3) {
+    const g = week2Gate(day, exercise, p.weeks[1]);
+    if (!g.pass) cur = p.weeks[1].slice();
+    notes.push(g.reason);
+  }
+  if (p.check && week === 4) {
+    notes.push('最後に確認: 予定のセットのあと、3回できる重さ(RPE8〜9)のトップセットを1回だけ追加し、推定1RMを更新します(無理はしない)。');
+  }
+  return { bw: false, kg: cur[0], reps: cur[1], sets: cur[2], notes };
+}
+
+function prescriptionText(rx) {
+  return rx.bw ? `${rx.reps}回 × ${rx.sets}セット` : `${rx.kg}kg × ${rx.reps}回 × ${rx.sets}セット`;
+}
+
+function currentPrescription() {
+  if (mode !== 'strength') return null;
+  const w = strengthWeekOf(document.getElementById('dateInput').value);
+  if (!w || w.status !== 'in') return null;
+  return strengthPrescription(currentDay, document.getElementById('exerciseSelect').value, w.week);
+}
+
+function setMode(m) {
+  mode = m;
+  document.getElementById('mode-strength').classList.toggle('active', m === 'strength');
+  document.getElementById('mode-free').classList.toggle('active', m === 'free');
+  document.getElementById('day-DAY3').style.display = (m === 'strength') ? '' : 'none';
+  let day = currentDay;
+  if (m === 'strength') {
+    day = strengthDayOfDate(document.getElementById('dateInput').value) || day;
+  } else if (day === 'DAY3') {
+    day = 'DAY1';
+  }
+  setDay(day);
+}
+
+function onDateChange() {
+  if (mode === 'strength') {
+    const d = strengthDayOfDate(document.getElementById('dateInput').value);
+    if (d && d !== currentDay) { setDay(d); return; }
+  }
+  renderPlan();
+}
+
+// 入力済みのセットが無いときだけ、予定のセット数ぶんの空欄行に揃える(入力中のデータは消さない)
+function syncSetRowsToPlan() {
+  const rx = currentPrescription();
+  if (!rx) return;
+  const hasData = sets.some(s => s.weight !== '' || s.reps !== '' || s.rpe !== '');
+  if (hasData) return;
+  sets = Array.from({ length: rx.sets }, () => ({ weight: '', reps: '', rpe: '' }));
+  markSetsContext();
+}
+
+function resetSetRows() {
+  const rx = currentPrescription();
+  const n = rx ? rx.sets : 3;
+  sets = Array.from({ length: n }, () => ({ weight: '', reps: '', rpe: '' }));
+  markSetsContext();
+  renderSets();
+}
+
+function selectExercise(ex) {
+  const sel = document.getElementById('exerciseSelect');
+  if (!Array.from(sel.options).some(o => o.value === ex)) return;
+  sel.value = ex;
+  onExerciseChange();
+}
+
+function applyPlanToSets() {
+  const rx = currentPrescription();
+  if (!rx) return;
+  sets = Array.from({ length: rx.sets }, () => ({ weight: rx.bw ? '' : rx.kg, reps: rx.reps, rpe: '' }));
+  markSetsContext();
+  renderSets();
+  showToast('予定を入力しました。実際にできた重さ・回数に直して、RPEを入れてください');
+}
+
+function renderPlan() {
+  const wrap = document.getElementById('planCardWrap');
+  if (!wrap) return;
+  if (mode !== 'strength') { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  const title = document.getElementById('planTitle');
+  const body = document.getElementById('planBody');
+  const dateStr = document.getElementById('dateInput').value;
+  const w = strengthWeekOf(dateStr);
+  if (!w) { title.textContent = '今日の予定'; body.innerHTML = ''; return; }
+  if (w.status === 'before') {
+    title.textContent = '筋力期メニュー';
+    body.innerHTML = '<div class="muted-note">筋力期メニューは10/1(木)から始まります。この日付の記録は「自由記録」に切り替えて入力できます。</div>';
+    return;
+  }
+  if (w.status === 'after') {
+    title.textContent = '筋力期メニュー';
+    body.innerHTML = '<div class="muted-note">筋力期(4週間)は10/28(水)で終わりました。この日付の記録は「自由記録」に切り替えて入力できます。</div>';
+    return;
+  }
+  title.innerHTML = `筋力期 第${w.week}週 ・ ${currentDay} <span class="planbadge">${STRENGTH_DAY_LABEL[currentDay]}</span>`;
+  const selected = document.getElementById('exerciseSelect').value;
+  let html = '';
+  const scheduled = strengthDayOfDate(dateStr);
+  if (!scheduled) {
+    html += '<div class="plannote warn">予定日(火・木・金)以外の日付です。表示中の' + currentDay + 'のメニューで記録できます。</div>';
+  } else if (scheduled !== currentDay) {
+    html += `<div class="plannote warn">この日(${STRENGTH_WEEKDAY_LABEL[scheduled]}曜)の予定は${scheduled}です。いまは${currentDay}を表示しています。</div>`;
+  }
+  html += '<div class="planlist">';
+  (STRENGTH_EXERCISES[currentDay] || []).forEach(ex => {
+    const rx = strengthPrescription(currentDay, ex, w.week);
+    if (!rx) return;
+    const done = sessionDone(dateStr, ex);
+    html += `<button type="button" class="planitem${ex === selected ? ' active' : ''}" onclick="selectExercise('${ex}')">`
+      + `<span class="planex">${done ? '<span class="plandone">✓</span> ' : ''}${ex}</span>`
+      + `<span class="planval">${prescriptionText(rx)}</span></button>`;
+  });
+  html += '</div>';
+  const rx = strengthPrescription(currentDay, selected, w.week);
+  if (rx) {
+    const prev = (function () {
+      const recs = recordsFor(selected).filter(r => r.date < dateStr);
+      return latestSessionSetsFromRecords(recs);
+    })();
+    const prevText = prev
+      ? prev.sets.map(s => `${s.weight > 0 ? s.weight + 'kg×' : ''}${s.reps}回${s.rpe ? '(RPE' + s.rpe + ')' : ''}`).join(' / ')
+      : null;
+    html += '<div class="plandetail">'
+      + `<div class="planlabel">${selected}の予定</div>`
+      + `<div class="planbig">${prescriptionText(rx)}</div>`;
+    rx.notes.forEach(n => { html += `<div class="plannote">${n}</div>`; });
+    if (prevText) html += `<div class="muted-note" style="margin-top:8px;">前回(${prev.date}): ${prevText}</div>`;
+    html += '<button type="button" class="planbtn" onclick="applyPlanToSets()">予定どおりに入力(重さ・回数)</button>'
+      + '<div class="muted-note" style="margin-top:6px;">RPEは終わってから自分で入れてください。できた重さ・回数が違うときは直して保存します。</div>'
+      + '</div>';
+  }
+  html += '<details class="rpe" style="margin-top:12px;"><summary>筋力期の約束ごと</summary>'
+    + '<ul class="planrules">'
+    + '<li>全セット同じ重さで行う(3セット目だけ重くしない)</li>'
+    + '<li>RPEは9まで。「あと1〜2回できる」余力を残して終える</li>'
+    + '<li>セット間は2〜3分あける。ウォームアップは軽い重さから段階的に</li>'
+    + '<li>痛みやフォームの乱れがあれば、そこで中止してコーチに伝える</li>'
+    + '</ul></details>';
+  if (currentDay !== 'DAY1') {
+    html += '<div class="muted-note" style="margin-top:8px;">体幹トレーニングは各自のメニューで行ってください(このアプリには記録しません)。</div>';
+  }
+  body.innerHTML = html;
+}
 
 // 現在の入力フォームが自重(回数ベース)モードかどうか
 function currentEntryIsBodyweight() {
@@ -375,6 +657,7 @@ function isBodyweightRecord(exercise, note) {
 }
 
 let currentDay = "DAY1";
+let mode = 'free'; // 'strength'=筋力期メニュー / 'free'=自由記録
 let sets = []; // {weight, reps, rpe}
 let setsExercise = ''; // sets配列が最後に入力された時点の種目(切り替え検知用)
 let setsDay = '';       // sets配列が最後に入力された時点のDAY(切り替え検知用)
@@ -399,19 +682,18 @@ function init() {
   document.getElementById('dateInput').value = todayStr();
   populateAbsSelect();
   populatePullupSelect();
-  populateExerciseSelect();
   populateEditAbsSelect();
   populateEditPullupSelect();
-  addSet();
-  addSet();
-  addSet();
+  const w0 = strengthWeekOf(todayStr());
+  setMode(w0 && w0.status === 'in' ? 'strength' : 'free');
+  if (!sets.length) resetSetRows();
   loadRecords();
 }
 
 function populateExerciseSelect() {
   const sel = document.getElementById('exerciseSelect');
   sel.innerHTML = '';
-  EXERCISES[currentDay].forEach(ex => {
+  dayExercises(currentDay).forEach(ex => {
     const opt = document.createElement('option');
     opt.value = ex; opt.textContent = ex;
     sel.appendChild(opt);
@@ -463,6 +745,7 @@ function setDay(day) {
   currentDay = day;
   document.getElementById('day-DAY1').classList.toggle('active', day === 'DAY1');
   document.getElementById('day-DAY2').classList.toggle('active', day === 'DAY2');
+  document.getElementById('day-DAY3').classList.toggle('active', day === 'DAY3');
   populateExerciseSelect();
 }
 
@@ -470,8 +753,10 @@ function onExerciseChange() {
   const ex = document.getElementById('exerciseSelect').value;
   document.getElementById('absWrap').style.display = isBodyweight(ex) ? 'block' : 'none';
   document.getElementById('pullupWrap').style.display = (ex === '懸垂') ? 'block' : 'none';
+  syncSetRowsToPlan();
   renderSets();
   renderTargetCard();
+  renderPlan();
 }
 
 function onPullupTypeChange() {
@@ -525,6 +810,9 @@ function updateSet(i, field, value) {
   sets[i][field] = value;
   markSetsContext();
   renderSets();
+  if (field === 'rpe' && mode === 'strength' && value !== '' && Number(value) > 9) {
+    showToast('RPEが9.5以上です。筋力期は「あと1〜2回できる」余力を残すのが目安です');
+  }
 }
 function renderSets() {
   const wrap = document.getElementById('setsList');
@@ -603,10 +891,24 @@ async function saveRecord() {
       headers: { 'Content-Type': 'text/plain;charset=utf-8' }
     });
     showToast('保存しました ✓');
-    sets = [];
-    addSet(); addSet(); addSet();
     await loadRecords();
+    if (mode === 'strength') {
+      // 次の未記録の種目に自動で進む(全部記録済みなら今の種目のまま)
+      const next = (STRENGTH_EXERCISES[currentDay] || []).find(ex => ex !== exercise && !sessionDone(date, ex));
+      if (next && next !== exercise) {
+        sets = [];
+        selectExercise(next);
+        if (!sets.length) resetSetRows();
+      } else {
+        sets = [];
+        resetSetRows();
+      }
+    } else {
+      sets = [];
+      addSet(); addSet(); addSet();
+    }
     renderTargetCard();
+    renderPlan();
   } catch (e) {
     showToast('保存に失敗しました: ' + e.message);
   } finally {
@@ -636,6 +938,7 @@ function setEditDay(day) {
   editDay = day;
   document.getElementById('editDay-DAY1').classList.toggle('active', day === 'DAY1');
   document.getElementById('editDay-DAY2').classList.toggle('active', day === 'DAY2');
+  document.getElementById('editDay-DAY3').classList.toggle('active', day === 'DAY3');
   populateEditExerciseSelect();
   onEditExerciseChange();
 }
@@ -728,9 +1031,10 @@ function openEditSession(date) {
   }));
   editRestoreNote = first.note || '';
   document.getElementById('editDateInput').value = date;
-  editDay = (first.day === 'DAY2') ? 'DAY2' : 'DAY1';
+  editDay = (first.day === 'DAY2' || first.day === 'DAY3') ? first.day : 'DAY1';
   document.getElementById('editDay-DAY1').classList.toggle('active', editDay === 'DAY1');
   document.getElementById('editDay-DAY2').classList.toggle('active', editDay === 'DAY2');
+  document.getElementById('editDay-DAY3').classList.toggle('active', editDay === 'DAY3');
   populateEditExerciseSelect();
   const exSel = document.getElementById('editExerciseSelect');
   if (Array.from(exSel.options).some(o => o.value === first.exercise)) {
@@ -837,6 +1141,7 @@ async function loadRecords() {
     }));
     loaded = true;
     renderTargetCard();
+    renderPlan();
     return true;
   } catch (e) {
     console.log('loadRecords error', e);
@@ -998,6 +1303,7 @@ function renderTargetCard() {
   const exercise = document.getElementById('exerciseSelect').value;
   const wrap = document.getElementById('targetCardWrap');
   const body = document.getElementById('targetCardBody');
+  if (mode === 'strength') { wrap.style.display = 'none'; return; }
   const last = latestSessionSets(exercise);
   if (!last) {
     if (loaded) {
@@ -1106,7 +1412,7 @@ function renderDashboard() {
   const last = latestSessionSetsFromRecords(recs);
   const dashWrap = document.getElementById('dashTargetWrap');
   const dashBody = document.getElementById('dashTargetBody');
-  if (last) {
+  if (last && mode !== 'strength') {
     const target = computeNextTarget(exercise, last.sets, bwEx);
     const valText = target.bodyweight
       ? `${target.repsTarget} × ${target.sets}セット`
