@@ -391,73 +391,164 @@ function isBodyweight(exercise) { return BODYWEIGHT_EXERCISES.includes(exercise)
 
 const PULLUP_TYPES = ["自重", "加重", "補助"]; // 懸垂のタイプ(重量入力があるのは「加重」のみ)
 function isPullupWeighted(type) { return type === '加重'; }
-
-/* ============ 筋力期メニュー(2026/10/1〜4週間・火=DAY1 / 木=DAY2 / 金=DAY3) ============ */
-const STRENGTH_START = '2026-10-01';   // 第1週の開始日(木曜)。1週間は木曜〜水曜
-const STRENGTH_WEEKS = 4;
-const STRENGTH_DAY_BY_WEEKDAY = { 2: 'DAY1', 4: 'DAY2', 5: 'DAY3' }; // getUTCDay(): 火=2, 木=4, 金=5
-const STRENGTH_WEEKDAY_LABEL = { DAY1: '火', DAY2: '木', DAY3: '金' };
-const STRENGTH_EXERCISES = {
-  DAY1: ["スクワット", "ベンチプレス", "懸垂"],
-  DAY2: ["デッドリフト", "ベントオーバーバーベルロー"],
-  DAY3: ["スクワット", "ベンチプレス", "懸垂"]
-};
-const STRENGTH_DAY_LABEL = {
-  DAY1: '重い日(スクワット・ベンチ)',
-  DAY2: 'デッドリフト・ロー',
-  DAY3: '軽い日(フォームとスピード)'
-};
-// weeks: 週ごとの [重量kg, 回数, セット数]。gate=第3週の増量を第2週の記録で自動判定、check=第4週に確認セットを案内
-const STRENGTH_PLAN = {
-  'DAY1|スクワット':   { gate: true, check: true, weeks: [[37.5,5,4],[40,4,4],[42.5,3,4],[32.5,5,3]] },
-  'DAY1|ベンチプレス': { gate: true, check: true, weeks: [[32.5,5,4],[35,4,4],[37.5,3,4],[30,5,3]] },
-  'DAY1|懸垂':         { bw: true, reps: 4, sets: 4 },
-  'DAY2|デッドリフト': { gate: true, check: true, weeks: [[37.5,5,3],[40,4,3],[42.5,3,3],[35,5,2]] },
-  'DAY2|ベントオーバーバーベルロー': { gate: true, weeks: [[37.5,6,3],[40,6,3],[42.5,5,3],[35,6,2]] },
-  'DAY3|スクワット':   { weeks: [[32.5,5,3],[32.5,5,3],[32.5,5,3],[32.5,5,3]] },
-  'DAY3|ベンチプレス': { weeks: [[30,6,3],[30,6,3],[30,6,3],[30,6,3]] },
-  'DAY3|懸垂':         { bw: true, reps: 4, sets: 4 }
-};
-const GATE_MAX_RPE = 8.5; // 第2週の全セットがこのRPE以下なら、第3週は増量する
-
-function dayExercises(day) {
-  return mode === 'strength' ? (STRENGTH_EXERCISES[day] || []) : (EXERCISES[day] || []);
+// 記録の編集画面で選べる種目(第2期のDAY2は軽いスクワット・ベンチも入る)
+function editExercises(day) {
+  const base = EXERCISES[day] || [];
+  return day === 'DAY2' ? base.concat(["スクワット", "ベンチプレス"].filter(x => base.indexOf(x) < 0)) : base;
 }
+
+/* ============ 筋力期メニュー(第1期: 10/1〜 火=DAY1/木=DAY2/金=DAY3、第2期: 10/27〜 火=DAY1/木=DAY2) ============ */
+const WEEKDAY_JA = ['日', '月', '火', '水', '木', '金', '土'];
+function addDays(ymd, n) {
+  const p = String(ymd).split('-').map(Number);
+  return new Date(Date.UTC(p[0], p[1] - 1, p[2]) + n * 86400000).toISOString().slice(0, 10);
+}
+function mdw(ymd) {
+  const p = String(ymd).split('-').map(Number);
+  const t = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+  return `${t.getUTCMonth() + 1}/${t.getUTCDate()}(${WEEKDAY_JA[t.getUTCDay()]})`;
+}
+
+// plan の weeks: 週ごとの [重量kg, 回数, セット数]
+//  gate3 = 第3週の増量を第2週の記録で自動判定 / adj = 前の週のRPEで ±2.5kg を自動調整 / check = 最終週に確認セットを案内
+const STRENGTH_BLOCKS = [
+  {
+    id: 'b1', label: '第1期', start: '2026-10-01', weeks: 4,   // 1週間は木曜〜水曜
+    dayByWeekday: { 2: 'DAY1', 4: 'DAY2', 5: 'DAY3' },        // getUTCDay(): 火=2, 木=4, 金=5
+    exercises: {
+      DAY1: ["スクワット", "ベンチプレス", "懸垂"],
+      DAY2: ["デッドリフト", "ベントオーバーバーベルロー"],
+      DAY3: ["スクワット", "ベンチプレス", "懸垂"]
+    },
+    dayLabel: { DAY1: '重い日(スクワット・ベンチ)', DAY2: 'デッドリフト・ロー', DAY3: '軽い日(フォームとスピード)' },
+    rules: [
+      '全セット同じ重さで行う(3セット目だけ重くしない)',
+      'RPEは9まで。「あと1〜2回できる」余力を残して終える',
+      'セット間は2〜3分あける。ウォームアップは軽い重さから段階的に',
+      '痛みやフォームの乱れがあれば、そこで中止してコーチに伝える'
+    ],
+    plan: {
+      'DAY1|スクワット':   { mode: 'gate3', check: 3, weeks: [[37.5,5,4],[40,4,4],[42.5,3,4],[32.5,5,3]] },
+      'DAY1|ベンチプレス': { mode: 'gate3', check: 3, weeks: [[32.5,5,4],[35,4,4],[37.5,3,4],[30,5,3]] },
+      'DAY1|懸垂':         { bw: true, reps: 4, sets: 4 },
+      'DAY2|デッドリフト': { mode: 'gate3', check: 3, weeks: [[37.5,5,3],[40,4,3],[42.5,3,3],[35,5,2]] },
+      'DAY2|ベントオーバーバーベルロー': { mode: 'gate3', weeks: [[37.5,6,3],[40,6,3],[42.5,5,3],[35,6,2]] },
+      'DAY3|スクワット':   { weeks: [[32.5,5,3],[32.5,5,3],[32.5,5,3],[32.5,5,3]] },
+      'DAY3|ベンチプレス': { weeks: [[30,6,3],[30,6,3],[30,6,3],[30,6,3]] },
+      'DAY3|懸垂':         { bw: true, reps: 4, sets: 4 }
+    }
+  },
+  {
+    id: 'b2', label: '第2期', start: '2026-10-27', weeks: 4,   // 1週間は火曜〜月曜
+    dayByWeekday: { 2: 'DAY1', 4: 'DAY2' },
+    exercises: {
+      DAY1: ["スクワット", "ベンチプレス", "懸垂"],
+      DAY2: ["デッドリフト", "ベントオーバーバーベルロー", "スクワット", "ベンチプレス"]
+    },
+    dayLabel: { DAY1: '重い日(スクワット・ベンチ)', DAY2: 'デッドリフト・ロー+軽いスクワット・ベンチ' },
+    rules: [
+      '全セット同じ重さで行う(3セット目だけ重くしない)',
+      '重い種目のRPEは9.5まで。10(限界)になったら、次の週は予定より2.5kg軽くする',
+      '軽いスクワット・ベンチはスピード重視。重さは変えず、上げる動作を素早く。RPE6〜7で止める(8以上なら次回2.5kg下げる)',
+      'セット間は2〜3分あける。ウォームアップは軽い重さから段階的に',
+      '痛みやフォームの乱れがあれば、そこで中止してコーチに伝える'
+    ],
+    plan: {
+      'DAY1|スクワット':   { mode: 'adj', checkKg: 40, weeks: [[37.5,4,4],[37.5,5,4],[40,3,4],[35,4,2]] },
+      'DAY1|ベンチプレス': { mode: 'adj', checkKg: 35, weeks: [[32.5,5,4],[32.5,6,4],[35,3,4],[30,5,2]] },
+      'DAY1|懸垂':         { bw: true, reps: 4, sets: 4, own: true },
+      'DAY2|デッドリフト': { mode: 'adj', weeks: [[40,3,3],[40,4,3],[42.5,2,3],[35,4,2]] },
+      'DAY2|ベントオーバーバーベルロー': { mode: 'adj', weeks: [[37.5,6,3],[40,5,3],[42.5,3,3],[35,6,2]] },
+      'DAY2|スクワット':   { light: true, weeks: [[32.5,5,2],[32.5,5,2],[32.5,5,2],[32.5,5,2]] },
+      'DAY2|ベンチプレス': { light: true, weeks: [[30,6,2],[30,6,2],[30,6,2],[30,6,2]] }
+    }
+  }
+];
+// 各期の最終日 = 開始日+週数、ただし次の期の前日まで
+STRENGTH_BLOCKS.forEach((b, i) => {
+  let end = addDays(b.start, b.weeks * 7 - 1);
+  const nx = STRENGTH_BLOCKS[i + 1];
+  if (nx) { const lim = addDays(nx.start, -1); if (lim < end) end = lim; }
+  b.end = end;
+});
+const GATE_MAX_RPE = 8.5; // 第1期: 第2週の全セットがこのRPE以下なら、第3週は増量する
+const ADJ_UP_RPE = 7.5;   // 第2期: 前の週の最大RPEがこれ以下で予定どおりできていれば+2.5kg
+const ADJ_DOWN_RPE = 10;  // 第2期: 前の週に限界(RPE10)のセットがあれば−2.5kg
+const ADJ_LIMIT = 5;      // 予定からの調整は±5kgまで
 
 function parseYmd(s) {
   const p = String(s).split('-').map(Number);
   return Date.UTC(p[0], p[1] - 1, p[2]);
 }
 
-// 日付 → 筋力期の週。{status:'before'|'in'|'after', week}
+// 日付 → 筋力期の週。{status:'before'|'in'|'after', week, block}
 function strengthWeekOf(dateStr) {
   if (!dateStr) return null;
-  const diff = Math.floor((parseYmd(dateStr) - parseYmd(STRENGTH_START)) / 86400000);
-  if (diff < 0) return { status: 'before' };
-  const week = Math.floor(diff / 7) + 1;
-  if (week > STRENGTH_WEEKS) return { status: 'after' };
-  return { status: 'in', week };
+  const first = STRENGTH_BLOCKS[0], last = STRENGTH_BLOCKS[STRENGTH_BLOCKS.length - 1];
+  if (dateStr < first.start) return { status: 'before' };
+  if (dateStr > last.end) return { status: 'after' };
+  for (let i = 0; i < STRENGTH_BLOCKS.length; i++) {
+    const b = STRENGTH_BLOCKS[i];
+    if (dateStr >= b.start && dateStr <= b.end) {
+      const diff = Math.floor((parseYmd(dateStr) - parseYmd(b.start)) / 86400000);
+      return { status: 'in', week: Math.floor(diff / 7) + 1, block: b };
+    }
+  }
+  return null;
+}
+
+// メニュー表示に使う期(期の外の日付でも、近い期を返す)
+function blockForDate(dateStr) {
+  const w = strengthWeekOf(dateStr);
+  if (w && w.block) return w.block;
+  return (w && w.status === 'before') ? STRENGTH_BLOCKS[0] : STRENGTH_BLOCKS[STRENGTH_BLOCKS.length - 1];
+}
+
+function dateInputValue() {
+  const el = document.getElementById('dateInput');
+  return el ? el.value : '';
+}
+
+function dayExercises(day) {
+  if (mode !== 'strength') return EXERCISES[day] || [];
+  return blockForDate(dateInputValue()).exercises[day] || [];
 }
 
 function strengthDayOfDate(dateStr) {
   if (!dateStr) return null;
-  return STRENGTH_DAY_BY_WEEKDAY[new Date(parseYmd(dateStr)).getUTCDay()] || null;
+  const b = blockForDate(dateStr);
+  return b.dayByWeekday[new Date(parseYmd(dateStr)).getUTCDay()] || null;
+}
+
+function weekdayLabelOfDay(block, day) {
+  const k = Object.keys(block.dayByWeekday).find(wd => block.dayByWeekday[wd] === day);
+  return k === undefined ? '' : WEEKDAY_JA[Number(k)];
 }
 
 function sessionDone(dateStr, exercise) {
   return allRecords.some(r => r.date === dateStr && r.exercise === exercise);
 }
 
-// 第3週の重さを決めるため、第2週(同じDAY・同じ種目)の最新セッションを判定する
-function week2Gate(day, exercise, w2) {
+// 指定の期・週・DAY・種目の、いちばん新しいセッション(セット配列)。なければnull
+function weekSession(block, day, exercise, week) {
+  const recs = allRecords.filter(r => {
+    if (r.exercise !== exercise || r.day !== day || !(r.weight > 0)) return false;
+    const w = strengthWeekOf(r.date);
+    return w && w.status === 'in' && w.block === block && w.week === week;
+  });
+  if (!recs.length) return null;
+  const dates = Array.from(new Set(recs.map(r => r.date))).sort();
+  const lastDate = dates[dates.length - 1];
+  return recs.filter(r => r.date === lastDate).sort((a, b) => a.setNumber - b.setNumber);
+}
+
+// 第1期: 第3週の重さを決めるため、第2週(同じDAY・同じ種目)の最新セッションを判定する
+function week2Gate(block, day, exercise, w2) {
   const kg2 = w2[0], reps2 = w2[1], sets2 = w2[2];
-  const recs = allRecords.filter(r => r.exercise === exercise && r.day === day && r.weight > 0
-    && (function () { const w = strengthWeekOf(r.date); return w && w.status === 'in' && w.week === 2; })());
-  if (!recs.length) {
+  const last = weekSession(block, day, exercise, 2);
+  if (!last) {
     return { pass: false, reason: '第2週の記録が見つからないため、安全のため今週は第2週と同じ重さで行います。' };
   }
-  const dates = Array.from(new Set(recs.map(r => r.date))).sort();
-  const last = recs.filter(r => r.date === dates[dates.length - 1]);
   const rpeVals = last.map(r => r.rpe).filter(v => v !== null && v !== undefined);
   if (rpeVals.length < last.length) {
     return { pass: false, reason: '第2週の記録にRPEが入っていないセットがあったため、今週は第2週と同じ重さで行います。' };
@@ -475,9 +566,48 @@ function week2Gate(day, exercise, w2) {
   return { pass: true, reason: `第2週は全セットRPE${maxRpe}以下で予定回数ができたので、今週は+2.5kgに進みます。` };
 }
 
-function pullupHint() {
-  const base = '全セットできる補助の強さで、4回×4セット。種類(自重/補助)を選び、補助の強さはメモに残しましょう。';
+// 第2期: 第1週〜前の週の記録から、予定の重さに足し引きする量(kg)と、前の週についての説明
+function adjOffset(block, day, exercise, week, p) {
+  let off = 0, lastNote = null;
+  const lastAdjustable = p.weeks.length - 1; // 最終週(軽くする週)には足し引きしない
+  for (let k = 1; k < week && k < lastAdjustable; k++) {
+    const base = p.weeks[k - 1];
+    const sess = weekSession(block, day, exercise, k);
+    let delta = 0, note = null;
+    if (!sess) {
+      note = `第${k}週の記録がないため、予定どおりの重さです。`;
+    } else {
+      const rpeVals = sess.map(r => r.rpe).filter(v => v !== null && v !== undefined);
+      if (rpeVals.length < sess.length) {
+        note = `第${k}週の記録にRPEが入っていないセットがあったため、予定どおりの重さです。`;
+      } else {
+        const maxRpe = Math.max.apply(null, rpeVals);
+        const planned = [base[0] + off, base[1], base[2]];
+        if (maxRpe >= ADJ_DOWN_RPE) {
+          delta = -2.5;
+          note = `第${k}週にRPE${maxRpe}(限界)のセットがあったので、予定より2.5kg軽くします。`;
+        } else if (maxRpe <= ADJ_UP_RPE && sess.length >= planned[2] && sess.every(r => r.reps >= planned[1] && r.weight >= planned[0])) {
+          delta = 2.5;
+          note = `第${k}週は全セットRPE${maxRpe}以下で予定どおりできたので、予定より2.5kg重くします。`;
+        } else {
+          note = `第${k}週はRPE${maxRpe}で適正でした。予定どおりの重さです。`;
+        }
+      }
+    }
+    off = Math.max(-ADJ_LIMIT, Math.min(ADJ_LIMIT, off + delta));
+    lastNote = note;
+  }
+  return { off, note: lastNote };
+}
+
+function pullupHint(block, p) {
   const last = latestSessionSetsFromRecords(recordsFor('懸垂'));
+  if (p && p.own) {
+    const notes = ['自重で4セット。各セットRPE9で止める(あと1回できる余力を残す)。1セット目が4回に届かない日は、ゴムバンドで補助を付けて4回できる強さにして、メモに残しましょう。'];
+    if (last && last.sets.length >= 4 && last.sets.every(s => s.reps >= 5)) notes.push('前回は全セット5回以上できました。補助を弱めるか、回数を5回に増やしてみましょう。');
+    return notes;
+  }
+  const base = '全セットできる補助の強さで、4回×4セット。種類(自重/補助)を選び、補助の強さはメモに残しましょう。';
   if (last && last.sets.length >= 4 && last.sets.every(s => s.reps >= 5)) {
     return [base, '前回は全セット5回以上できました。補助を1段階弱めてみましょう。'];
   }
@@ -485,19 +615,38 @@ function pullupHint() {
 }
 
 // 1種目ぶんの予定 {bw, kg, reps, sets, notes[]}。予定がない場合はnull
-function strengthPrescription(day, exercise, week) {
-  const p = STRENGTH_PLAN[day + '|' + exercise];
+function strengthPrescription(block, day, exercise, week) {
+  const p = block.plan[day + '|' + exercise];
   if (!p) return null;
-  if (p.bw) return { bw: true, reps: p.reps, sets: p.sets, notes: pullupHint() };
+  if (p.bw) return { bw: true, reps: p.reps, sets: p.sets, notes: pullupHint(block, p) };
   let cur = p.weeks[week - 1].slice();
   const notes = [];
-  if (p.gate && week === 3) {
-    const g = week2Gate(day, exercise, p.weeks[1]);
+  const isLast = week === p.weeks.length;
+  if (p.mode === 'gate3' && week === 3) {
+    const g = week2Gate(block, day, exercise, p.weeks[1]);
     if (!g.pass) cur = p.weeks[1].slice();
     notes.push(g.reason);
   }
-  if (p.check && week === 4) {
+  if (p.mode === 'gate3' && p.check && isLast) {
     notes.push('最後に確認: 予定のセットのあと、3回できる重さ(RPE8〜9)のトップセットを1回だけ追加し、推定1RMを更新します(無理はしない)。');
+  }
+  if (p.mode === 'adj') {
+    if (!isLast) {
+      const a = adjOffset(block, day, exercise, week, p);
+      if (a.off !== 0) {
+        cur[0] = cur[0] + a.off;
+        notes.push(`予定の重さに${a.off > 0 ? '+' : ''}${a.off}kg しています(前の週までのRPEから)。`);
+      }
+      if (a.note) notes.push(a.note);
+      if (week === 1) {
+        notes.push('最初の週は、1セット目のRPEを見て確かめます。RPE10(限界)だったら、2セット目から2.5kg下げてかまいません。');
+      }
+    } else if (p.checkKg) {
+      notes.push(`最後に確認: 予定のセットのあと、${p.checkKg}kgで限界まで(RPE9で止める。無理はしない)を1セット追加し、推定1RMを更新します。`);
+    }
+  }
+  if (p.light) {
+    notes.push('スピード重視: 重さは変えず、上げる動作を素早く。RPE6〜7で止めます(8以上なら次回2.5kg下げる)。');
   }
   return { bw: false, kg: cur[0], reps: cur[1], sets: cur[2], notes };
 }
@@ -508,29 +657,51 @@ function prescriptionText(rx) {
 
 function currentPrescription() {
   if (mode !== 'strength') return null;
-  const w = strengthWeekOf(document.getElementById('dateInput').value);
+  const w = strengthWeekOf(dateInputValue());
   if (!w || w.status !== 'in') return null;
-  return strengthPrescription(currentDay, document.getElementById('exerciseSelect').value, w.week);
+  return strengthPrescription(w.block, currentDay, document.getElementById('exerciseSelect').value, w.week);
+}
+
+let lastBlockId = null;
+function refreshDayButtons() {
+  const b = blockForDate(dateInputValue());
+  ['DAY1', 'DAY2', 'DAY3'].forEach(d => {
+    const el = document.getElementById('day-' + d);
+    if (!el) return;
+    el.style.display = (mode === 'strength') ? (b.exercises[d] ? '' : 'none') : (d === 'DAY3' ? 'none' : '');
+  });
 }
 
 function setMode(m) {
   mode = m;
   document.getElementById('mode-strength').classList.toggle('active', m === 'strength');
   document.getElementById('mode-free').classList.toggle('active', m === 'free');
-  document.getElementById('day-DAY3').style.display = (m === 'strength') ? '' : 'none';
   let day = currentDay;
   if (m === 'strength') {
-    day = strengthDayOfDate(document.getElementById('dateInput').value) || day;
+    const dateStr = dateInputValue();
+    const b = blockForDate(dateStr);
+    day = strengthDayOfDate(dateStr) || day;
+    if (!b.exercises[day]) day = Object.keys(b.exercises)[0];
+    lastBlockId = b.id;
   } else if (day === 'DAY3') {
     day = 'DAY1';
   }
+  refreshDayButtons();
   setDay(day);
 }
 
 function onDateChange() {
   if (mode === 'strength') {
-    const d = strengthDayOfDate(document.getElementById('dateInput').value);
-    if (d && d !== currentDay) { setDay(d); return; }
+    const dateStr = dateInputValue();
+    const b = blockForDate(dateStr);
+    let d = strengthDayOfDate(dateStr);
+    if (!d && !b.exercises[currentDay]) d = Object.keys(b.exercises)[0];
+    const blockChanged = b.id !== lastBlockId;
+    lastBlockId = b.id;
+    refreshDayButtons();
+    if ((d && d !== currentDay) || blockChanged) { setDay(d || currentDay); return; }
+    syncSetRowsToPlan();
+    renderSets();
   }
   renderPlan();
 }
@@ -576,42 +747,45 @@ function renderPlan() {
   wrap.style.display = 'block';
   const title = document.getElementById('planTitle');
   const body = document.getElementById('planBody');
-  const dateStr = document.getElementById('dateInput').value;
+  const dateStr = dateInputValue();
   const w = strengthWeekOf(dateStr);
   if (!w) { title.textContent = '今日の予定'; body.innerHTML = ''; return; }
   if (w.status === 'before') {
     title.textContent = '筋力期メニュー';
-    body.innerHTML = '<div class="muted-note">筋力期メニューは10/1(木)から始まります。この日付の記録は「自由記録」に切り替えて入力できます。</div>';
+    body.innerHTML = `<div class="muted-note">筋力期メニューは${mdw(STRENGTH_BLOCKS[0].start)}から始まります。この日付の記録は「自由記録」に切り替えて入力できます。</div>`;
     return;
   }
   if (w.status === 'after') {
+    const lastEnd = STRENGTH_BLOCKS[STRENGTH_BLOCKS.length - 1].end;
     title.textContent = '筋力期メニュー';
-    body.innerHTML = '<div class="muted-note">筋力期(4週間)は10/28(水)で終わりました。この日付の記録は「自由記録」に切り替えて入力できます。</div>';
+    body.innerHTML = `<div class="muted-note">筋力期メニュー(${STRENGTH_BLOCKS[STRENGTH_BLOCKS.length - 1].label}まで)は${mdw(lastEnd)}で終わりました。この日付の記録は「自由記録」に切り替えて入力できます。</div>`;
     return;
   }
-  title.innerHTML = `筋力期 第${w.week}週 ・ ${currentDay} <span class="planbadge">${STRENGTH_DAY_LABEL[currentDay]}</span>`;
+  const block = w.block;
+  title.innerHTML = `筋力期 ${block.label} 第${w.week}週 ・ ${currentDay} <span class="planbadge">${block.dayLabel[currentDay] || ''}</span>`;
   const selected = document.getElementById('exerciseSelect').value;
   let html = '';
   const scheduled = strengthDayOfDate(dateStr);
+  const dayNames = Object.keys(block.dayByWeekday).map(k => WEEKDAY_JA[Number(k)]).join('・');
   if (!scheduled) {
-    html += '<div class="plannote warn">予定日(火・木・金)以外の日付です。表示中の' + currentDay + 'のメニューで記録できます。</div>';
+    html += `<div class="plannote warn">予定日(${dayNames})以外の日付です。表示中の${currentDay}のメニューで記録できます。</div>`;
   } else if (scheduled !== currentDay) {
-    html += `<div class="plannote warn">この日(${STRENGTH_WEEKDAY_LABEL[scheduled]}曜)の予定は${scheduled}です。いまは${currentDay}を表示しています。</div>`;
+    html += `<div class="plannote warn">この日(${weekdayLabelOfDay(block, scheduled)}曜)の予定は${scheduled}です。いまは${currentDay}を表示しています。</div>`;
   }
   html += '<div class="planlist">';
-  (STRENGTH_EXERCISES[currentDay] || []).forEach(ex => {
-    const rx = strengthPrescription(currentDay, ex, w.week);
+  (block.exercises[currentDay] || []).forEach(ex => {
+    const rx = strengthPrescription(block, currentDay, ex, w.week);
     if (!rx) return;
     const done = sessionDone(dateStr, ex);
     html += `<button type="button" class="planitem${ex === selected ? ' active' : ''}" onclick="selectExercise('${ex}')">`
-      + `<span class="planex">${done ? '<span class="plandone">✓</span> ' : ''}${ex}</span>`
+      + `<span class="planex">${done ? '<span class="plandone">✓</span> ' : ''}${ex}${(block.plan[currentDay + '|' + ex] || {}).light ? '(軽)' : ''}</span>`
       + `<span class="planval">${prescriptionText(rx)}</span></button>`;
   });
   html += '</div>';
-  const rx = strengthPrescription(currentDay, selected, w.week);
+  const rx = strengthPrescription(block, currentDay, selected, w.week);
   if (rx) {
     const prev = (function () {
-      const recs = recordsFor(selected).filter(r => r.date < dateStr);
+      const recs = recordsFor(selected).filter(r => r.date < dateStr && r.day === currentDay);
       return latestSessionSetsFromRecords(recs);
     })();
     const prevText = prev
@@ -626,12 +800,8 @@ function renderPlan() {
       + '<div class="muted-note" style="margin-top:6px;">RPEは終わってから自分で入れてください。できた重さ・回数が違うときは直して保存します。</div>'
       + '</div>';
   }
-  html += '<details class="rpe" style="margin-top:12px;"><summary>筋力期の約束ごと</summary>'
-    + '<ul class="planrules">'
-    + '<li>全セット同じ重さで行う(3セット目だけ重くしない)</li>'
-    + '<li>RPEは9まで。「あと1〜2回できる」余力を残して終える</li>'
-    + '<li>セット間は2〜3分あける。ウォームアップは軽い重さから段階的に</li>'
-    + '<li>痛みやフォームの乱れがあれば、そこで中止してコーチに伝える</li>'
+  html += '<details class="rpe" style="margin-top:12px;"><summary>筋力期の約束ごと</summary><ul class="planrules">'
+    + block.rules.map(r => `<li>${r}</li>`).join('')
     + '</ul></details>';
   if (currentDay !== 'DAY1') {
     html += '<div class="muted-note" style="margin-top:8px;">体幹トレーニングは各自のメニューで行ってください(このアプリには記録しません)。</div>';
@@ -894,7 +1064,7 @@ async function saveRecord() {
     await loadRecords();
     if (mode === 'strength') {
       // 次の未記録の種目に自動で進む(全部記録済みなら今の種目のまま)
-      const next = (STRENGTH_EXERCISES[currentDay] || []).find(ex => ex !== exercise && !sessionDone(date, ex));
+      const next = dayExercises(currentDay).find(ex => ex !== exercise && !sessionDone(date, ex));
       if (next && next !== exercise) {
         sets = [];
         selectExercise(next);
@@ -927,7 +1097,7 @@ function showToast(msg) {
 function populateEditExerciseSelect() {
   const sel = document.getElementById('editExerciseSelect');
   sel.innerHTML = '';
-  EXERCISES[editDay].forEach(ex => {
+  editExercises(editDay).forEach(ex => {
     const opt = document.createElement('option');
     opt.value = ex; opt.textContent = ex;
     sel.appendChild(opt);
